@@ -1,0 +1,48 @@
+stages:          # количество и порядок этапов сборки
+  - build-vue    # сборка приложения Vue.js
+  - test         # тестрование файла на HTML синтаксис
+  - build        # сборка образа Docker
+
+variables:                              # переменные доступные во всех заданиях в пайплайне
+  CONTAINER_NAME: "1t_task_5.3"         # имя собираемого контейнера
+  IMAGE_NAME: "registry_url/path/1t_task_5.3" # имя образа контейнера
+  DOCKERFILE_PATH: "./Dockerfile"       # путь до используемого Docker-файла
+
+build-vue:                              # имя задания
+  image: node:20-alpine                 # используемый образ при выполнении задания (NodeJS 20ой версии)
+  stage: build-vue                      # задание относится к этапу сборки приложения Vue.js
+  script:                               # далее идёт скрипт задания, он выполняется поочереди, команда за командой
+    - cd vue_app/                       # переходим в папку с приложением 
+    - npm ci                            # команда замена npm install,используется для установки всех зависимостей но в CI окружении
+    - npm run build                     # сборка приложения
+  artifacts:                            # раздел отвечает за артефакты остающиеся после выполнения задания
+    paths:
+      - vue_app/dist/                   # в данном случае мы оставляем файлы собранного приложения, чтобы они были доступны в следующих заданиях
+
+validate-html:                          # задание пример тестирования приложения
+  stage: test                           # запускается на этапе тестирования
+  script:
+    - apt-get update -qy
+    - apt-get install -y nodejs npm     # устанавливаем Node.js и NPM
+    - npm install -g htmlhint jshint csslint  # Установить htmlhint (приложение для тестирования HTMLя)
+    - htmlhint index.html               # Проверить HTML файл на валидность
+    - htmlhint vue_app/dist/index.html  # Проверить HTML файл на валидность
+  dependencies:                         # Раздел с зависимостями, задание выполнится строго после задания build-vue
+    - build-vue
+  artifacts:
+    paths:
+      - vue_app/dist/
+
+build-image:                            # Задание по сборке Docker образа
+  image: docker:20.10.16                # докер образ используемый в задании
+  services:                             # для сборки Docker внутри Docker используется сервис Docker in Docker
+    - docker:20.10.16-dind
+  stage: build                          # Задание относится к этапу сборки
+  script:
+    - echo "Building Docker image..."
+    - docker build -t $IMAGE_NAME -f $DOCKERFILE_PATH .
+    - echo "Pushing Docker image to Docker Container Registry..."
+    - echo "REGISTRY_PASSWORD" | docker login -u $REGISTRY_USER --password-stdin $REGISTRY
+    - docker push $IMAGE_NAME
+  dependencies:
+    - validate-html
